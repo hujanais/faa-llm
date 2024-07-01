@@ -19,15 +19,16 @@ load_dotenv()
 
 class ChatAgent:
     def __init__(self):
-        print("ctor CandidateAgent")
         # apiKey = os.environ["GOOGLE_API_KEY"]
         # self.llm = ChatGoogleGenerativeAI(
         #     model="models/gemini-pro", google_api_key=apiKey, temperature=0
         # )
         # self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        # print("ctor CandidateAgent - using Google Gemini Pro.")
 
         self.llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
         self.embeddings = OpenAIEmbeddings()
+        print("ctor CandidateAgent - using ChatGPT")
 
         self.abbreviationsDB = None
         self.reportsDB = None
@@ -57,17 +58,24 @@ class ChatAgent:
         # Prompt Template
         template = """You are a helpful assistant that is able to retrieve information and answer my questions succinctly and accurately.
             You will only analyze and answer questions based on the following abbreviation keys and context:
-            Contains list of abbreviation and keys: {abbreviations}
-            Contains a list of issues or reports: {reports}
+            
+            ### Key to reading abbreviations specific to flight:
+            {abbreviations}
+            
+            ### The following is a list of issues or reports:
+            {reports}
 
-            If you do not know the answer, just say you do not know and don't try to guess.
+            All your answers should be based on the context of the reports and abbreviations provided above.  When answering a question,
+            always include the ACN reference number in the title line if available.  
 
+            Current conversation:
+            {history}
             Question: {question}
             """
 
-        prompt = ChatPromptTemplate.from_template(template)
-
-        retriever = self.reportsDB.as_retriever()
+        # important to set k because default is 4.
+        prompt = ChatPromptTemplate.from_template(template, kwargs={"k": 4})
+        retriever = self.reportsDB.as_retriever(search_kwargs={"k": 4})
 
         # Build the langchain
         self.chain = (
@@ -76,12 +84,12 @@ class ChatAgent:
                 | self.abbreviationsDB.as_retriever(),
                 "reports": itemgetter("question") | retriever,
                 "question": itemgetter("question"),
+                "history": itemgetter("history"),
             }
             | prompt
             | self.llm
             | StrOutputParser()
         )
-
         # self.chain = RunnableParallel(
         #     {
         #         "reports": retriever,
@@ -98,7 +106,7 @@ class ChatAgent:
         row = 0
         documents: List[Document] = []
 
-        with open("./documents/dataset1.csv", "r") as file:
+        with open("./documents/dataset1-small.csv", "r") as file:
             while True:
                 line = file.readline()
                 row += 1
